@@ -40,6 +40,8 @@ async function initChart(canvas, width, height, dpr) {
 
   data = [];
 
+  // 注释掉与后端通信的代码
+  /*
   try {
     const res = await new Promise((resolve, reject) => {
       wx.request({
@@ -84,12 +86,26 @@ async function initChart(canvas, width, height, dpr) {
     // 添加默认数据
     data.push({value: [new Date().toISOString(), 0]});
   }
+  */
 
-  console.log('初始化数据:', data);
+  // 添加默认模拟数据
+  now = new Date(); // 使用当前日期
+  // 生成过去30天的模拟数据
+  for (var i = 30; i >= 0; i--) {
+    var pastDate = new Date(now.getTime() - (i * oneDay));
+    data.push({
+      value: [
+        pastDate.toISOString(),
+        Math.round(Math.random() * 100) // 0-100之间的随机雨量
+      ]
+    });
+  }
+
+  console.log('初始化模拟数据:', data);
 
   var option = {
     title: {
-      text: '雨量显示'
+      text: '雨量显示 (模拟数据)'
     },
     tooltip: {
       trigger: 'axis',
@@ -153,6 +169,8 @@ function startDataPolling() {
   }
   
   intervalId = setInterval(function() {
+    // 注释掉原来的API请求代码
+    /*
     wx.request({
       url: 'http://api.heclouds.com/devices/997978117/datapoints', 
       data: {
@@ -212,6 +230,30 @@ function startDataPolling() {
         console.error('定时请求失败:', err);
       }
     });
+    */
+
+    // 添加新的模拟数据
+    var newData = randomData();
+    console.log('添加新的模拟数据:', newData);
+    
+    data.push(newData);
+    
+    // 保持数据量合理
+    if (data.length > 30) {
+      data.shift();
+    }
+    
+    // 更新图表
+    if (chartAll) {
+      chartAll.setOption({
+        series: [{
+          data: data
+        }]
+      });
+    } else {
+      console.warn('图表尚未初始化，无法更新');
+    }
+    
   }, 5000);
 }
 
