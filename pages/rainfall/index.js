@@ -7,6 +7,17 @@ var now = new Date(1997, 9, 3);
 var oneDay = 24 * 3600 * 1000;
 var value = Math.random() * 1000;
 var chartAll = null;
+var intervalId = null; // 存储setInterval的ID，便于清理
+
+// 获取当前日期30天前的日期字符串
+function getLastMonthDate() {
+  const date = new Date();
+  date.setDate(date.getDate() - 28); // 设为28天前，确保在30天范围内
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}T00:00:00`;
+}
 
 function randomData() {
   now = new Date(+now + oneDay);
@@ -27,39 +38,54 @@ async function initChart(canvas, width, height, dpr) {
   });
   canvas.setChart(chart);
 
-  // var temp_data = [];
-  // for (var i = 0; i < 1000; i++) {
-  //   now = new Date(+now + oneDay);
-  //   value = value + Math.random() * 21 - 10;
-  //   temp_data.push( {value: [
-  //     [now.getFullYear(), now.getMonth() + 1, now.getDate()].join('/'),
-  //     Math.round(value)
-  //   ]});
-  // }
-  // console.log(temp_data)
-
   data = [];
 
-  await wx.request({
-    url: 'https://your-server.com/api/rainfall/data', // 替换为您的服务器地址
-    data: {
-      'start_time': '2025-03-01T00:00:00',
-      'limit': 1
-    },
-    header: {
-      'content-type': 'application/json',
-      'Authorization': 'Bearer ' + wx.getStorageSync('token') // 使用JWT token认证
-    },
-    success (res) {
-      console.log(res.data)
-      console.log(res.data.data.datastreams[0].datapoints)
-      for (var d = 0; d < res.data.data.datastreams[0].datapoints.length; d++){
-        data.push({value: [res.data.data.datastreams[0].datapoints[d].at, res.data.data.datastreams[0].datapoints[d].value]})
+  try {
+    const res = await new Promise((resolve, reject) => {
+      wx.request({
+        url: 'http://api.heclouds.com/devices/997978117/datapoints', 
+        data: {
+          'datastream_id': 'rain_info',
+          'start': getLastMonthDate(),  // 使用动态计算的日期
+          'limit': '1',
+          'sort': 'DESC'
+        },
+        header: {
+          'content-type': 'application/json',
+          'Authorization': 'version=2018-10-31&res=products%2F544361&et=1765738973&method=sha1&sign=C4OPW%2FNXTz%2BV%2FeCtKPNpojivlPM%3D',
+        },
+        success: resolve,
+        fail: reject
+      });
+    });
+    
+    console.log(res.data);
+    
+    // 安全地访问数据
+    if (res.data && res.data.data && res.data.data.datastreams && 
+        res.data.data.datastreams.length > 0 && 
+        res.data.data.datastreams[0].datapoints) {
+      
+      const datapoints = res.data.data.datastreams[0].datapoints;
+      console.log(datapoints);
+      
+      for (var d = 0; d < datapoints.length; d++) {
+        data.push({
+          value: [datapoints[d].at, datapoints[d].value]
+        });
       }
+    } else {
+      console.log('API返回数据格式不符合预期或无数据');
+      // 添加一些默认数据以防API没有返回数据
+      data.push({value: [new Date().toISOString(), 0]});
     }
-  })
+  } catch (error) {
+    console.error('请求失败:', error);
+    // 添加默认数据
+    data.push({value: [new Date().toISOString(), 0]});
+  }
 
-  console.log(data)
+  console.log('初始化数据:', data);
 
   var option = {
     title: {
@@ -68,9 +94,7 @@ async function initChart(canvas, width, height, dpr) {
     tooltip: {
       trigger: 'axis',
       formatter: function (params) {
-        console.log(params);
         params = params[0];
-        console.log(params);
         var date = new Date(params.name);
         return (
           date.getDate() +
@@ -101,7 +125,7 @@ async function initChart(canvas, width, height, dpr) {
     },
     series: [
       {
-        name: 'Fake Data',
+        name: '雨量数据',
         type: 'line',
         showSymbol: false,
         data: data
@@ -111,72 +135,85 @@ async function initChart(canvas, width, height, dpr) {
 
   chart.setOption(option);
   chartAll = chart;
+  
+  // 启动定时更新
+  startDataPolling();
+  
   return chart;
 }
 
 var nowDate = null;
 var traceMark = false;
 var storageTimeStamp = null;
-setInterval(function () {
-  wx.request({
-    url: 'https://your-server.com/api/rainfall/realtime', // 替换为您的实时数据接口
-    data: {
-      'timestamp': new Date().toISOString()
-    },
-    header: {
-      'content-type': 'application/json',
-      'Authorization': 'Bearer ' + wx.getStorageSync('token')
-    },
-    success (res) {
 
-      console.log('333333333333333333333333333333')
-      console.log(res.data)
-      console.log(res.data.data.datastreams[0].datapoints)
-      for (var d = 0; d < res.data.data.length; d++) {
-        console.log('**********************')
-        console.log(res.data.data[d].timestamp)
-        console.log(data[data.length-1].value[0])
-       //待解决 设备产生数据的时间戳和本地时钟的时间无法同步，造成本地时钟相对超前
-        // if((res.data.data.datastreams[0].datapoints[d].at == data[data.length-1].value[0]) || (res.data.data.datastreams[0].datapoints[d].at == storageTimeStamp && traceMark == true)){
-        //   traceMark = true;
-        //   console.log('enter')
-        //   nowDate = new Date();
-        //   console.log(nowDate.getMonth()) //注意getMonthd
-        //   let temp_date = nowDate.getFullYear() + '-' + (nowDate.getMonth()+1).toString() + '-' + nowDate.getDate() + ' ' + nowDate.getHours() + ':' + nowDate.getMinutes() + ':' + nowDate.getSeconds() + '.' + '000'; 
-        //   console.log(nowDate)
-        //   console.log(temp_date)
-        //   console.log('8888888888888888888888888888888888')
-        //   console.log({value: [temp_date, res.data.data.datastreams[0].datapoints[d].value]})
-        //   data.push({value: [temp_date, res.data.data.datastreams[0].datapoints[d].value]})
-        // }else{
-          traceMark = false;
-          storageTimeStamp = res.data.data.datastreams[0].datapoints[d].at;
-          data.push({value: [res.data.data[d].timestamp, res.data.data[d].value]})
-          if(res.data.data.datastreams[0].datapoints[d].at == data[data.length-1].value[0]){
-               traceMark = true;
+function startDataPolling() {
+  // 清除可能存在的旧计时器
+  if (intervalId) {
+    clearInterval(intervalId);
+  }
+  
+  intervalId = setInterval(function() {
+    wx.request({
+      url: 'http://api.heclouds.com/devices/997978117/datapoints', 
+      data: {
+        'datastream_id': 'rain_info',
+        'start': getLastMonthDate(), // 使用动态计算的日期
+        'limit': '1',
+        'sort': 'DESC'
+      },
+      header: {
+        'content-type': 'application/json',
+        'Authorization': 'version=2018-10-31&res=products%2F544361&et=1765738973&method=sha1&sign=C4OPW%2FNXTz%2BV%2FeCtKPNpojivlPM%3D',
+      },
+      success: function(res) {
+        console.log('定时请求返回:', res.data);
+        
+        // 安全地访问数据
+        if (res.data && res.data.data && res.data.data.datastreams && 
+            res.data.data.datastreams.length > 0 && 
+            res.data.data.datastreams[0].datapoints) {
+          
+          const datapoints = res.data.data.datastreams[0].datapoints;
+          
+          for (var d = 0; d < datapoints.length; d++){
+            console.log('新数据时间戳:', datapoints[d].at);
+            
+            if (data.length > 0) {
+              console.log('最后一条数据时间戳:', data[data.length-1].value[0]);
+            }
+            
+            traceMark = false;
+            storageTimeStamp = datapoints[d].at;
+            data.push({value: [datapoints[d].at, datapoints[d].value]});
+            
+            if (data.length > 0 && datapoints[d].at === data[data.length-1].value[0]) {
+              traceMark = true;
+            }
+            
+            // 修正了拼写错误 True -> true
+            if (data.length > 20 && traceMark === true) {
+              data.shift();
+            }
           }
-         if(data.length > 20 && traceMark == True){
-             data.shift();
+          
+          // 安全地更新图表
+          if (chartAll) {
+            chartAll.setOption({
+              series: [{
+                data: data
+              }]
+            });
+          } else {
+            console.warn('图表尚未初始化,无法更新');
+          }
         }
-        // }
+      },
+      fail: function(err) {
+        console.error('定时请求失败:', err);
       }
-    },
-    error(){
-      data = data;
-    }
-  })
-  // for (var i = 0; i < 5; i++) {
-  //   data.shift();
-  //   data.push(randomData());
-  // }
-  chartAll.setOption({
-    series: [
-      {
-        data: data
-      }
-    ]
-  });
-}, 5000);
+    });
+  }, 5000);
+}
 
 Page({
   onShareAppMessage: function (res) {
@@ -195,8 +232,11 @@ Page({
   onReady() {
   },
   onUnload(){
-    //data = [];
+    // 清除定时器防止内存泄漏
+    if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
     console.log("quit");
-    //clearInterval();
   }
 });
